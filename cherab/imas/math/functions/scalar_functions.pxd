@@ -1,3 +1,5 @@
+# cython: language_level=3
+
 # Copyright 2023 Euratom
 # Copyright 2023 United Kingdom Atomic Energy Authority
 # Copyright 2023 Centro de Investigaciones Energéticas, Medioambientales y Tecnológicas
@@ -16,6 +18,18 @@
 # See the Licence for the specific language governing permissions and limitations
 # under the Licence.
 
-from .load_unstruct_2d import load_unstruct_grid_2d
-from .load_struct_2d import load_struct_grid_2d
-from .load_grid import load_grid
+from raysect.core.math.function.float cimport Function1D, Function2D, Function3D
+
+
+cdef class ConstantMapper2D(Function2D):
+
+    cdef:
+        readonly int axis
+        Function1D _function
+
+
+cdef class ConstantMapper3D(Function3D):
+
+    cdef:
+        readonly int axis
+        Function2D _function

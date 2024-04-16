@@ -27,15 +27,18 @@ from raysect.core.math.function.vector3d.function3d cimport Function3D as Vector
 cdef class StructGridFunction3D(Function3D):
 
     cdef:
-        np.ndarray _x, _y, _z, _grid_data
-        double[::1] _x_mv, _y_mv, _z_mv
-        double[:, :, ::1] _grid_data_mv
+        long _subset_size
+        np.ndarray _x, _y, _z, _grid_data, _subset_map
+        double[::1] _x_mv, _y_mv, _z_mv, _grid_data_mv
+        np.int64_t[:, :, ::1] _subset_map_mv
         double _fill_value
 
 cdef class StructGridVectorFunction3D(VectorFunction3D):
 
     cdef:
+        long _subset_size
         np.ndarray _x, _y, _z, _grid_vectors
         double[::1] _x_mv, _y_mv, _z_mv
-        double[:, :, :, ::1] _grid_vectors_mv
+        double[:, ::1] _grid_vectors_mv
+        np.int64_t[:, :, ::1] _subset_map_mv        
         Vector3D _fill_vector

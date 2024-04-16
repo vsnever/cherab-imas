@@ -21,39 +21,40 @@
 import numpy as np
 
 from raysect.core.math.vector cimport new_vector3d
-from raysect.core.math.point cimport new_point2d
+from raysect.core.math.point cimport new_point3d
 
 cimport cython
 
 
-cdef class UnstructGridFunction2D(Function2D):
+cdef class UnstructGridFunction3D(Function3D):
     """
-    A simple interpolator for the data defined on the 2D unstructured grid.
-    Finds the cell containing the point (x, y) using the KDtree algorithm.
+    A simple interpolator for the data defined on the 3D unstructured grid.
+    Finds the cell containing the point (x, y, z) using the KDtree algorithm.
     Returns the data value for this cell or the `fill_value` if the grid
     does not contain the point. 
 
-    :param object vertex_coords: 2D (N,2) array-like with the vertex coordinates of triangles.
-    :param object triangles: 2D (M,3) integer array-like with the vertex indices forming
-        the triangles.
-    :param object triangle_to_cell_map: 1D (M,) integer array-like with the indices of
-        the grid cells (polygons) containing the triangles.
+    :param object vertex_coords: 2D (N,3) array-like with the vertex coordinates of tetrahedra.
+    :param object tetrahedra: 2D (M,4) integer array-like with the vertex indices forming
+        the tetrahedra.
+    :param object tetrahedra_to_cell_map: 1D (M,) integer array-like with the indices of
+        the grid cells (polyhedra) containing the tetrahedra.
     :param ndarray grid_data: An array containing data in the grid cells.
     :param double fill_value: A value returned outside the gird. Default is 0.
     """
 
-    def __init__(self, object vertex_coords not None, object triangles not None, object triangle_to_cell_map not None,
+    def __init__(self, object vertex_coords not None, object tetrahedra not None,
+                 object tetrahedra_to_cell_map not None,
                  np.ndarray grid_data not None, double fill_value=0):
 
         vertex_coords = np.array(vertex_coords, dtype=np.float64)
-        triangles = np.array(triangles, dtype=np.int32)
-        triangle_to_cell_map = np.array(triangle_to_cell_map, dtype=np.int32)
+        tetrahedra = np.array(tetrahedra, dtype=np.int32)
+        tetrahedra_to_cell_map = np.array(tetrahedra_to_cell_map, dtype=np.int32)
 
         # build kdtree
-        self._kdtree = MeshKDTree2D(vertex_coords, triangles)
+        self._kdtree = MeshKDTree3D(vertex_coords, tetrahedra)
 
-        self._triangle_to_cell_map = triangle_to_cell_map
-        self._triangle_to_cell_map_mv = self._triangle_to_cell_map
+        self._tetrahedra_to_cell_map = tetrahedra_to_cell_map
+        self._tetrahedra_to_cell_map_mv = self._tetrahedra_to_cell_map
 
         # Attention!!! Do not copy grid_data! Attribute self._grid_data must point to the original data array,
         # so as not to re-initialize the interpolator if the user changes data values.
@@ -65,11 +66,11 @@ cdef class UnstructGridFunction2D(Function2D):
         self._grid_data_mv = self._grid_data
 
     def __getstate__(self):
-        return self._grid_data, self._fill_value, self._triangle_to_cell_map, self._kdtree
+        return self._grid_data, self._fill_value, self._tetrahedra_to_cell_map, self._kdtree
 
     def __setstate__(self, state):
-        self._grid_data, self._fill_value, self._triangle_to_cell_map, self._kdtree = state
-        self._triangle_to_cell_map_mv = self._triangle_to_cell_map
+        self._grid_data, self._fill_value, self._tetrahedra_to_cell_map, self._kdtree = state
+        self._tetrahedra_to_cell_map_mv = self._tetrahedra_to_cell_map
         self._grid_data_mv = self._grid_data
 
     def __reduce__(self):
@@ -78,8 +79,8 @@ cdef class UnstructGridFunction2D(Function2D):
     @classmethod
     def instance(cls, object instance not None, np.ndarray grid_data=None, object fill_value=None):
         """
-        Creates a new interpolator instance from an existing UnstructGridFunction2D
-        or UnstructGridVectorFunction2D instance.
+        Creates a new interpolator instance from an existing UnstructGridFunction3D
+        or UnstructGridVectorFunction3D instance.
         The new interpolator instance will share the same internal acceleration
         data as the original interpolator. The grid_data of the new instance can
         be redefined.
@@ -88,44 +89,44 @@ cdef class UnstructGridFunction2D(Function2D):
         repeated rebuilding of the mesh acceleration structures by sharing the
         geometry data between multiple interpolator objects.
 
-        If created from the UnstructGridVectorFunction2D instance,
+        If created from the UnstructGridVectorFunction3D instance,
         the grid_data and the fill_value must not be None.
 
-        :param object instance: UnstructGridFunction2D or UnstructGridVectorFunction2D object.
+        :param object instance: UnstructGridFunction3D or UnstructGridVectorFunction3D object.
         :param ndarray grid_data: An array containing data in the grid cells.
         :param object fill_value: A value returned outside the grid.
-        :rtype: UnstructGridFunction2D
+        :rtype: UnstructGridFunction3D
         """
 
-        cdef UnstructGridFunction2D m, inst
-        cdef UnstructGridVectorFunction2D instvec
+        cdef UnstructGridFunction3D m, inst
+        cdef UnstructGridVectorFunction3D instvec
 
-        m = UnstructGridFunction2D.__new__(UnstructGridFunction2D)
+        m = UnstructGridFunction3D.__new__(UnstructGridFunction3D)
 
-        if isinstance(instance, UnstructGridFunction2D):
+        if isinstance(instance, UnstructGridFunction3D):
             inst = instance
             # copy source data
             m._kdtree = inst._kdtree
-            m._triangle_to_cell_map = inst._triangle_to_cell_map
+            m._tetrahedra_to_cell_map = inst._tetrahedra_to_cell_map
 
             # replace grid data and fill value
             m._grid_data = inst._grid_data if grid_data is None else grid_data
             m._fill_value = inst._fill_value if fill_value is None else <double>fill_value
-        elif isinstance(instance, UnstructGridVectorFunction2D):
+        elif isinstance(instance, UnstructGridVectorFunction3D):
             instvec = instance
             m._kdtree = instvec._kdtree
-            m._triangle_to_cell_map = instvec._triangle_to_cell_map
+            m._tetrahedra_to_cell_map = instvec._tetrahedra_to_cell_map
 
             if grid_data is None:
-                raise ValueError("Argument 'grid_data' must not be None if the new instant UnstructGridFunction2D is created from the UnstructGridVectorFunction2D instance.")
+                raise ValueError("Argument 'grid_data' must not be None if the new instant UnstructGridFunction3D is created from the UnstructGridVectorFunction3D instance.")
             if fill_value is None:
-                raise ValueError("Argument 'fill_value' must not be None if the new instant UnstructGridFunction2D is created from the UnstructGridVectorFunction2D instance.")
+                raise ValueError("Argument 'fill_value' must not be None if the new instant UnstructGridFunction3D is created from the UnstructGridVectorFunction3D instance.")
             m._grid_data = grid_data
             m._fill_value = <double>fill_value
         else:
-            raise TypeError("Argument 'instance' must be either UnstructGridFunction2D or UnstructGridVectorFunction2D instance.")
+            raise TypeError("Argument 'instance' must be either UnstructGridFunction3D or UnstructGridVectorFunction3D instance.")
 
-        m._triangle_to_cell_map_mv = m._triangle_to_cell_map
+        m._tetrahedra_to_cell_map_mv = m._tetrahedra_to_cell_map
         m._grid_data_mv = m._grid_data
 
         return m
@@ -133,47 +134,48 @@ cdef class UnstructGridFunction2D(Function2D):
     @cython.boundscheck(False)
     @cython.wraparound(False)
     @cython.initializedcheck(False)
-    cdef double evaluate(self, double x, double y) except? -1e999:
+    cdef double evaluate(self, double x, double y, double z) except? -1e999:
 
         cdef:
-            np.int32_t triangle_id, icell
+            np.int32_t tetrahedra_id, icell
 
-        if self._kdtree.is_contained(new_point2d(x, y)):
+        if self._kdtree.is_contained(new_point3d(x, y, z)):
 
-            triangle_id = self._kdtree.triangle_id
-            icell = self._triangle_to_cell_map_mv[triangle_id]
+            tetrahedra_id = self._kdtree.tetrahedra_id
+            icell = self._tetrahedra_to_cell_map_mv[tetrahedra_id]
             return self._grid_data_mv[icell]
 
         return self._fill_value
 
-cdef class UnstructGridVectorFunction2D(VectorFunction2D):
+cdef class UnstructGridVectorFunction3D(VectorFunction3D):
     """
-    A simple vector interpolator for the data defined on the 2D unstructured grid.
-    Finds the cell containing the point (x, y) using the KDtree algorithm.
+    A simple vector interpolator for the data defined on the 3D unstructured grid.
+    Finds the cell containing the point (x, y, z) using the KDtree algorithm.
     Returns the 3D vector value for this cell or the `fill_vector` if the grid
     does not contain the point.
 
-    :param object vertex_coords: 2D (N,3) array-like with the vertex coordinates of triangles.
-    :param object triangles: 2D (M,3) integer array-like with the vertex indices forming
-        the triangles.
-    :param object triangle_to_cell_map: 1D (M,) integer array-like with the indices of
-        the grid cells (polygons) containing the triangles.
+    :param object vertex_coords: 2D (N,3) array-like with the vertex coordinates of tetrahedra.
+    :param object tetrahedra: 2D (M,4) integer array-like with the vertex indices forming
+        the tetrahedra.
+    :param object tetrahedra_to_cell_map: 1D (M,) integer array-like with the indices of
+        the grid cells (polygons) containing the tetrahedra.
     :param ndarray grid_vectors: A (3,K) array containing 3D vectors in the grid cells.
     :param Vector3D fill_vector: A 3D vector returned outside the grid. Default is (0, 0, 0).
     """
 
-    def __init__(self, object vertex_coords not None, object triangles not None, object triangle_to_cell_map not None,
+    def __init__(self, object vertex_coords not None, object tetrahedra not None,
+                 object tetrahedra_to_cell_map not None,
                  np.ndarray grid_vectors not None, Vector3D fill_vector=Vector3D(0, 0, 0)):
 
         vertex_coords = np.array(vertex_coords, dtype=np.float64)
-        triangles = np.array(triangles, dtype=np.int32)
-        triangle_to_cell_map = np.array(triangle_to_cell_map, dtype=np.int32)
+        tetrahedra = np.array(tetrahedra, dtype=np.int32)
+        tetrahedra_to_cell_map = np.array(tetrahedra_to_cell_map, dtype=np.int32)
 
         # build kdtree
-        self._kdtree = MeshKDTree2D(vertex_coords, triangles)
+        self._kdtree = MeshKDTree3D(vertex_coords, tetrahedra)
 
-        self._triangle_to_cell_map = triangle_to_cell_map
-        self._triangle_to_cell_map_mv = self._triangle_to_cell_map
+        self._tetrahedra_to_cell_map = tetrahedra_to_cell_map
+        self._tetrahedra_to_cell_map_mv = self._tetrahedra_to_cell_map
 
         # Attention!!! Do not copy grid_vectors! Attribute self._grid_vectors must point to the original data array,
         # so as not to re-initialize the interpolator if the user changes data values.
@@ -185,12 +187,12 @@ cdef class UnstructGridVectorFunction2D(VectorFunction2D):
         self._grid_vectors_mv = self._grid_vectors
 
     def __getstate__(self):
-        return self._grid_vectors, self._fill_vector, self._triangle_to_cell_map, self._kdtree
+        return self._grid_vectors, self._fill_vector, self._tetrahedra_to_cell_map, self._kdtree
 
     def __setstate__(self, state):
-        self._grid_vectors, self._fill_vector, self._triangle_to_cell_map, self._kdtree = state
+        self._grid_vectors, self._fill_vector, self._tetrahedra_to_cell_map, self._kdtree = state
         self._grid_vectors_mv = self._grid_vectors
-        self._triangle_to_cell_map_mv = self._triangle_to_cell_map
+        self._tetrahedra_to_cell_map_mv = self._tetrahedra_to_cell_map
 
     def __reduce__(self):
         return self.__new__, (self.__class__, ), self.__getstate__()
@@ -199,8 +201,8 @@ cdef class UnstructGridVectorFunction2D(VectorFunction2D):
     def instance(cls, object instance not None, np.ndarray grid_vectors=None,
                  Vector3D fill_vector=None):
         """
-        Creates a new interpolator instance from an existing UnstructGridVectorFunction2D
-        or UnstructGridFunction2D instance.
+        Creates a new interpolator instance from an existing UnstructGridVectorFunction3D
+        or UnstructGridFunction3D instance.
         The new interpolator instance will share the same internal acceleration
         data as the original interpolator. The grid_vectors of the new instance can
         be redefined.
@@ -209,43 +211,43 @@ cdef class UnstructGridVectorFunction2D(VectorFunction2D):
         repeated rebuilding of the mesh acceleration structures by sharing the
         geometry data between multiple interpolator objects.
 
-        If created from the UnstructGridFunction2D instance,
+        If created from the UnstructGridFunction3D instance,
         the grid_vectors and the fill_vector must not be None.
 
-        :param object instance: UnstructGridVectorFunction2D or UnstructGridFunction2D object.
+        :param object instance: UnstructGridVectorFunction3D or UnstructGridFunction3D object.
         :param ndarray grid_vectors: An array containing vector grid data.
-        :rtype: UnstructGridVectorFunction2D
+        :rtype: UnstructGridVectorFunction3D
         """
 
-        cdef UnstructGridVectorFunction2D m, instvec
-        cdef UnstructGridFunction2D inst
+        cdef UnstructGridVectorFunction3D m, instvec
+        cdef UnstructGridFunction3D inst
 
-        m = UnstructGridVectorFunction2D.__new__(UnstructGridVectorFunction2D)
+        m = UnstructGridVectorFunction3D.__new__(UnstructGridVectorFunction3D)
 
-        if isinstance(instance, UnstructGridVectorFunction2D):
+        if isinstance(instance, UnstructGridVectorFunction3D):
             instvec = instance
             # copy source data
             m._kdtree = instvec._kdtree
-            m._triangle_to_cell_map = instvec._triangle_to_cell_map
+            m._tetrahedra_to_cell_map = instvec._tetrahedra_to_cell_map
 
             # replace grid vector and fill vector
             m._grid_vectors = instvec._grid_vectors if grid_vectors is None else grid_vectors
             m._fill_vector = instvec._fill_vector if fill_vector is None else fill_vector
-        elif isinstance(instance, UnstructGridFunction2D):
+        elif isinstance(instance, UnstructGridFunction3D):
             inst = instance
             m._kdtree = inst._kdtree
-            m._triangle_to_cell_map = inst._triangle_to_cell_map
+            m._tetrahedra_to_cell_map = inst._tetrahedra_to_cell_map
 
             if grid_vectors is None:
-                raise ValueError("Argument 'grid_vectors' must not be None if the new instant UnstructGridVectorFunction2D is created from the UnstructGridFunction2D instance.")
+                raise ValueError("Argument 'grid_vectors' must not be None if the new instant UnstructGridVectorFunction3D is created from the UnstructGridFunction3D instance.")
             if fill_vector is None:
-                raise ValueError("Argument 'fill_vector' must not be None if the new instant UnstructGridVectorFunction2D is created from the UnstructGridFunction2D instance.")
+                raise ValueError("Argument 'fill_vector' must not be None if the new instant UnstructGridVectorFunction3D is created from the UnstructGridFunction3D instance.")
             m._grid_vectors = grid_vectors
             m._fill_vector = fill_vector
         else:
-            raise TypeError("Argument 'instance' must be either UnstructGridFunction2D or UnstructGridVectorFunction2D instance.")
+            raise TypeError("Argument 'instance' must be either UnstructGridFunction3D or UnstructGridVectorFunction3D instance.")
 
-        m._triangle_to_cell_map_mv = m._triangle_to_cell_map
+        m._tetrahedra_to_cell_map_mv = m._tetrahedra_to_cell_map
         m._grid_vectors_mv = m._grid_vectors
 
         return m
@@ -253,16 +255,16 @@ cdef class UnstructGridVectorFunction2D(VectorFunction2D):
     @cython.boundscheck(False)
     @cython.wraparound(False)
     @cython.initializedcheck(False)
-    cdef Vector3D evaluate(self, double x, double y):
+    cdef Vector3D evaluate(self, double x, double y, double z):
 
         cdef:
-            np.int32_t triangle_id, icell
+            np.int32_t tetrahedra_id, icell
             double vx, vy, vz
 
-        if self._kdtree.is_contained(new_point2d(x, y)):
+        if self._kdtree.is_contained(new_point3d(x, y, z)):
 
-            triangle_id = self._kdtree.triangle_id
-            icell = self._triangle_to_cell_map_mv[triangle_id]
+            tetrahedra_id = self._kdtree.tetrahedra_id
+            icell = self._tetrahedra_to_cell_map_mv[tetrahedra_id]
             vx = self._grid_vectors_mv[0, icell]
             vy = self._grid_vectors_mv[1, icell]
             vz = self._grid_vectors_mv[2, icell]

@@ -16,4 +16,5 @@
 # See the Licence for the specific language governing permissions and limitations
 # under the Licence.
 
-from cherab.imas.math.functions.vector_functions cimport UnitVector1D, UnitVector2D, UnitVector3D
+from cherab.imas.math.functions.scalar_functions cimport ConstantMapper2D, ConstantMapper3D
+from cherab.imas.math.functions.vector_functions cimport UnitVector1D, UnitVector2D, UnitVector3D, VectorConstantMapper2D, VectorConstantMapper3D

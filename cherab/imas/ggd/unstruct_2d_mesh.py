@@ -41,6 +41,24 @@ class UnstructGrid2D(GGDGrid):
         in clockwise or counterclockwise order for each polygonal cell in the list
         (the starting vertex must not be included twice).
     :param str name: A name of the grid. Default is 'Cells'.
+    :param str coordinate_system: The coordinate system: 'cylindrical' (default)
+        or 'cartesian'. In case of 'cylindrical' coordinates, vertices lie in the rz plane.
+
+    :ivar name: A name of the grid.
+    :ivar dimension: Grid dimensions.
+    :ivar num_cell: The number of grid cells.
+    :ivar vertices: Mesh vertex coordinates as (N, 2) array.
+    :ivar cells: List with polygonal cells of num_cell length.
+    :ivar triangles: Mesh triangles as (M, 3) array.
+    :ivar triangle_to_cell_map: Array of shape (M,) mapping every triangle to a grid cell index.
+    :ivar cell_to_triangle_map: Array of shape (num_cell, 2) mapping every grid cell to triangles.
+        The first column is the index of the first triangle forming the cell.
+        The second column is the number of triangles forming the cell.
+    :ivar cell_centre: Coordinates of cell centres as (num_cell,3) array.
+    :ivar cell_area: Cell areas as (num_cell,) array.
+    :ivar cell_volume: Cell volumes as (num_cell,) array in case of cylindrical coordinates.
+    :ivar mesh_extent: Extent of the mesh. A dictionary with xmin, xmax, ymin, ymax keys.
+        In case of cylindrical coordinates also contains rmin, rmax, zmin, zmax keys.
     """
 
     def __init__(self, vertices, cells, name='Cells', coordinate_system='cylindrical'):
@@ -76,19 +94,27 @@ class UnstructGrid2D(GGDGrid):
         x = self._vertices[:, 0]
         y = self._vertices[:, 1]
 
+        # Work out the extent of the mesh.
+        if self._coordinate_system == 'cylindrical':
+            self._mesh_extent = {
+                "xmin": -x.max(), "xmax": x.max(),
+                "ymin": -x.max(), "ymax": x.max(),
+                "rmin": x.min(), "rmax": x.max(),
+                "zmin": y.min(), "zmax": y.max()
+            }
+        elif self._coordinate_system == 'cartesian':
+            self._mesh_extent = {
+                "xmin": x.min(), "xmax": x.max(),
+                "ymin": y.min(), "ymax": y.max()
+            }
+
+        # Triangulate cells
         ntri_total = 0
         for cell in self._cells:
             ntri_total += len(cell) - 2
 
-        # Work out the extent of the mesh (both Cartesian and cylindrical).
-        self._mesh_extent = {"xmin": x.min(), "xmax": x.max(),
-                             "ymin": y.min(), "ymax": y.max(),
-                             "rmin": x.min(), "rmax": x.max(),
-                             "zmin": y.min(), "zmax": y.max()}
-
-        # Triangulate cells
         self._triangles = np.empty((ntri_total, 3), dtype=np.int32)
-        self._cell_to_triangle_map = np.empty((len(self._cells), 2), dtype=np.int32)
+        self._cell_to_triangle_map = np.empty((self._num_cell, 2), dtype=np.int32)
         self._triangle_to_cell_map = np.empty(ntri_total, dtype=np.int32)
     
         itri = 0
@@ -109,8 +135,8 @@ class UnstructGrid2D(GGDGrid):
         self._triangle_to_cell_map.setflags(write=False)
 
         # Calculate cell area and centroid
-        self._cell_centre = np.empty((len(self._cells), 2), dtype=np.float64)
-        self._cell_area = np.empty(len(self._cells), dtype=np.float64)
+        self._cell_centre = np.empty((self._num_cell, 2), dtype=np.float64)
+        self._cell_area = np.empty(self._num_cell, dtype=np.float64)
 
         vx = x[self._triangles]
         vy = y[self._triangles]
@@ -126,7 +152,7 @@ class UnstructGrid2D(GGDGrid):
         self._cell_area.setflags(write=False)
 
         if self._coordinate_system == 'cylindrical':
-            self._cell_volume = 0.5 * np.pi * self._cell_centre[:, 0] * self._cell_area
+            self._cell_volume = 2 * np.pi * self._cell_centre[:, 0] * self._cell_area
             self._cell_volume.setflags(write=False)
 
     @property
@@ -169,7 +195,7 @@ class UnstructGrid2D(GGDGrid):
         """
         Creates a subset UnstructGrid2D from this instance.
 
-        :param indices: Indices of the cells of the original grid in the subset.
+        :param indices: Indices of the cells in the subset with respect to this grid.
         :param name: Name of the grid subset. Default is instance.name + ' subset'.
         """
 
@@ -180,10 +206,10 @@ class UnstructGrid2D(GGDGrid):
         grid._dimension = self._dimension
         grid._interpolator = None
 
-        cells_original = tuple(self.cells[i] for i in indices)  # all cells in this subset but with original vertex indices
+        cells_original = tuple(self._cells[i] for i in indices)  # all cells in this subset but with original vertex indices
         cells_all = np.concatenate(cells_original)  # all vertex indices in this subset with repetitions
         vert_indx, inv_indx = np.unique(cells_all, return_inverse=True)  # all unique vertex indices in this subset
-        grid._vertices = np.array(self.vertices[vert_indx])  # vertices in this subset
+        grid._vertices = np.array(self._vertices[vert_indx])  # vertices in this subset
         grid._vertices.setflags(write=False)
 
         # renumerating vertex indices
@@ -197,27 +223,35 @@ class UnstructGrid2D(GGDGrid):
         ntri_total = ist - 2 * len(cells_original)
         
         # cell area and centres of this subset
-        grid._cell_area = np.array(self.cell_area[indices])
+        grid._cell_area = np.array(self._cell_area[indices])
         grid._cell_area.setflags(write=False)
-        grid._cell_centre = np.array(self.cell_centre[indices])
+        grid._cell_centre = np.array(self._cell_centre[indices])
         grid._cell_centre.setflags(write=False)
 
         # mesh extent of this subset
         xmin, ymin = grid._vertices.min(0)
         xmax, ymax = grid._vertices.max(0)
-        grid._mesh_extent = {"xmin": xmin, "xmax": xmax,
-                             "ymin": ymin, "ymax": ymax,
-                             "rmin": xmin, "rmax": xmax,
-                             "zmin": ymin, "zmax": ymax}
+        if grid._coordinate_system == 'cylindrical':
+            grid._mesh_extent = {
+                "xmin": -xmax, "xmax": xmax,
+                "ymin": -xmax, "ymax": xmax,
+                "rmin": xmin, "rmax": xmax,
+                "zmin": ymin, "zmax": ymax
+            }
+        elif grid._coordinate_system == 'cartesian':
+            grid._mesh_extent = {
+                "xmin": xmin, "xmax": xmax,
+                "ymin": ymin, "ymax": ymax
+            }
         
         # triangles and maps of this subset
         grid._triangles = np.empty((ntri_total, 3), dtype=np.int32)
         grid._cell_to_triangle_map = np.empty((len(cells), 2), dtype=np.int32)
         grid._triangle_to_cell_map = np.empty(ntri_total, dtype=np.int32)
 
-        c2t_map = self.cell_to_triangle_map[indices]  # map with original triangle indices
+        c2t_map = self._cell_to_triangle_map[indices]  # map with original triangle indices
         # maps original vertices to the subset, -1 if not in the subset
-        subset_vertex_map = -1 * np.ones(self.vertices.shape[0], dtype=np.int32)
+        subset_vertex_map = -1 * np.ones(self._vertices.shape[0], dtype=np.int32)
         subset_vertex_map[vert_indx] = np.arange(vert_indx.size, dtype=np.int32)
     
         itri = 0
@@ -227,7 +261,7 @@ class UnstructGrid2D(GGDGrid):
                 grid._triangles[i] = cell
             else:
                 c2t = c2t_map[i]
-                tri = self.triangles[c2t[0]:c2t[0] + c2t[1]]
+                tri = self._triangles[c2t[0]:c2t[0] + c2t[1]]
                 grid._triangles[itri:itri + ntri] = subset_vertex_map[tri]
             grid._cell_to_triangle_map[i] = [itri, ntri]
             grid._triangle_to_cell_map[itri:itri + ntri] = i
@@ -265,7 +299,7 @@ class UnstructGrid2D(GGDGrid):
         On the second and subsequent calls, the interpolator is created as an instance
         of the previously created interpolator sharing the same KDtree structure.
 
-        :param grid_vectors: A (K,3) array containing 3D vectors in the grid cells.
+        :param grid_vectors: A (3,K) array containing 3D vectors in the grid cells.
         :param fill_vector: A 3D vector returned outside the gird. Default is (0, 0, 0).
 
         :returns: UnstructGridVectorFunction2D interpolator
@@ -291,7 +325,7 @@ class UnstructGrid2D(GGDGrid):
         self._dimension = state['dimension']
         self._coordinate_system = state['coordinate_system']
         self._vertices = state['vertices']
-        self._vertices.flags(write=False)
+        self._vertices.setflags(write=False)
         self._cells = state['cells']
 
         self._initial_setup()
@@ -313,15 +347,17 @@ class UnstructGrid2D(GGDGrid):
             collection_mesh.set_array(data[self._triangle_to_cell_map])
         ax.add_collection(collection_mesh)
         ax.set_aspect(1)
-        ax.set_xlim(self._mesh_extent["xmin"], self._mesh_extent["xmax"])
-        ax.set_ylim(self._mesh_extent["ymin"], self._mesh_extent["ymax"])
 
         if self._coordinate_system == 'cartesian':
+            ax.set_xlim(self._mesh_extent["xmin"], self._mesh_extent["xmax"])
+            ax.set_ylim(self._mesh_extent["ymin"], self._mesh_extent["ymax"])
             ax.set_xlabel("X [m]")
             ax.set_ylabel("Y [m]")
         elif self._coordinate_system == 'cylindrical':
+            ax.set_xlim(self._mesh_extent["rmin"], self._mesh_extent["rmax"])
+            ax.set_ylim(self._mesh_extent["zmin"], self._mesh_extent["zmax"])
             ax.set_xlabel("R [m]")
-            ax.set_ylabel("Z [m]") 
+            ax.set_ylabel("Z [m]")
 
         return ax
 
@@ -347,10 +383,14 @@ class UnstructGrid2D(GGDGrid):
         ax.set_ylim(self._mesh_extent["ymin"], self._mesh_extent["ymax"])
 
         if self._coordinate_system == 'cartesian':
+            ax.set_xlim(self._mesh_extent["xmin"], self._mesh_extent["xmax"])
+            ax.set_ylim(self._mesh_extent["ymin"], self._mesh_extent["ymax"])
             ax.set_xlabel("X [m]")
             ax.set_ylabel("Y [m]")
         elif self._coordinate_system == 'cylindrical':
+            ax.set_xlim(self._mesh_extent["rmin"], self._mesh_extent["rmax"])
+            ax.set_ylim(self._mesh_extent["zmin"], self._mesh_extent["zmax"])
             ax.set_xlabel("R [m]")
-            ax.set_ylabel("Z [m]")            
+            ax.set_ylabel("Z [m]")        
 
         return ax

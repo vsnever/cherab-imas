@@ -21,15 +21,14 @@ from scipy.constants import atomic_mass, electron_mass
 
 import imas
 
-from raysect.core.math.function.float import Function2D, Constant2D, Constant3D
-from raysect.core.math.function.vector3d import Function2D as VectorFunction2D
+from raysect.core.math.function.float import Constant2D, Constant3D
 from raysect.core.math.function.vector3d import Constant2D as ConstantVector2D
 from raysect.core.math.function.vector3d import Constant3D as ConstantVector3D
 from raysect.core.math import translate, Vector3D
 from raysect.primitive import Cylinder, Subtract
 
 from cherab.core import Plasma, Species, Maxwellian
-from cherab.core.math import AxisymmetricMapper, VectorAxisymmetricMapper
+from cherab.core.math import VectorAxisymmetricMapper
 from cherab.core.utility import RecursiveDict
 from cherab.tools.equilibrium.efit import PoloidalFieldVector, FluxSurfaceNormal
 
@@ -150,6 +149,9 @@ def get_edge_interpolators(grid, profiles, b_field=None, return3d=False):
     """
     Create interpolators for the profiles defined on a grid.
 
+    In case of 3D grid or if return3d is True, the returned interpolator works in
+    the Cartesian coordinates.
+
     :param grid: GGD-compatible grid object.
     :param profiles: A dictionary with edge plasma profiles.
     :param b_field: 2D interpolator of the magnetic field vector (Br, Btor, Bz). Default is None.
@@ -161,26 +163,38 @@ def get_edge_interpolators(grid, profiles, b_field=None, return3d=False):
 
     interpolators = RecursiveDict()
 
+    if grid.dimension == 3:
+        return3d = True
+
     for prof_key, profile in profiles.items():
         if 'velocity' in prof_key:
             continue
+        interpolators[prof_key] = None
         if profile is not None:
-            func = grid.interpolator(profile)
-            if isinstance(func, Function2D) and return3d:
-                func = AxisymmetricMapper(func)
-            interpolators[prof_key] = func
-        else:
-            interpolators[prof_key] = None
+            interpolators[prof_key] = grid.cartesian_3d_interpolator(profile) if return3d else grid.interpolator(profile)
 
-    vector_func = get_velocity_interpolators(grid, profiles, b_field)
-    if isinstance(vector_func, VectorFunction2D) and return3d:
-        vector_func = VectorAxisymmetricMapper(vector_func)
-    interpolators['velocity'] = vector_func
+    interpolators['velocity'] = get_velocity_interpolators(grid, profiles, b_field, return3d)
 
     return interpolators.freeze()
 
 
-def get_velocity_interpolators(grid, profiles, b_field=None):
+def get_velocity_interpolators(grid, profiles, b_field=None, return3d=False):
+    """
+    Create vector interpolators for the velocity profiles defined on a grid.
+
+    In case of 3D grid or if return3d is True, the returned interpolator works in
+    the Cartesian coordinates.
+
+    :param grid: GGD-compatible grid object.
+    :param profiles: A dictionary with edge plasma profiles. The supported velocity keys are:
+        'velocity_radial', 'velocity_poloidal', 'velocity_parallel', 'velocity_toroidal',
+        'velocity_r' and 'velocity_z'.
+    :param b_field: 2D interpolator of the magnetic field vector (Br, Btor, Bz). Default is None.
+    :param return3d: If True, convert 2D interpolators to 3D assuming rotational symmetry.
+        Default is False.
+
+    :returns: A dictionary with edge interpolators.
+    """
 
     # Note: np.all(None == 0) returns False
     vrad = None if np.all(profiles['velocity_radial'] == 0) else profiles['velocity_radial']
@@ -191,26 +205,36 @@ def get_velocity_interpolators(grid, profiles, b_field=None):
     vz = None if np.all(profiles['velocity_z'] == 0) else profiles['velocity_z']
 
     if not b_field:
-        return get_cylindrical_velocity_interpolators(grid, vr, vz, vtor)
+        return get_cylindrical_velocity_interpolators(grid, vr, vz, vtor, return3d)
 
     if vrad is None and vr is not None and vz is not None:
         if vtor is None and vpar is not None:
             _, vtor = _get_components_from_vpar(grid, vpar, b_field)
-        return get_cylindrical_velocity_interpolators(grid, vr, vz, vtor)
+        return get_cylindrical_velocity_interpolators(grid, vr, vz, vtor, return3d)
 
     if vpar is None:
-        return get_poloidal_velocity_interpolators(grid, vpol, vrad, vtor, b_field)
+        return get_poloidal_velocity_interpolators(grid, vpol, vrad, vtor, b_field, return3d)
 
-    return get_parallel_velocity_interpolators(grid, vpar, vrad, b_field)
+    return get_parallel_velocity_interpolators(grid, vpar, vrad, b_field, return3d)
 
 
-def get_cylindrical_velocity_interpolators(grid, vr, vz, vtor):
+def get_cylindrical_velocity_interpolators(grid, vr, vz, vtor, return3d=False):
+    """
+    Creates velocity interpolator from data arrays for
+    R, Z and toroidal velocity components.
+
+    In case of 3D grid or if return3d is True, the returned interpolator works in
+    the Cartesian coordinates.
+    """
+
+    if grid.dimension == 3:
+        return3d = True
 
     if vr is None and vz is None and vtor is None:
-        if grid.dimension == 2:
-            return ConstantVector2D(Vector3D(0, 1.e-16, 0))  # avoid zero-length vectors for blending
+        if return3d:
+            return ConstantVector3D(Vector3D(0, 1.e-16, 0))  # avoid zero-length vectors for blending
 
-        return ConstantVector3D(Vector3D(0, 1.e-16, 0))  # avoid zero-length vectors for blending
+        return ConstantVector2D(Vector3D(0, 1.e-16, 0))
 
     if vr is None:
         vr = np.zeros(grid.num_cell, dtype=np.float64)
@@ -218,55 +242,90 @@ def get_cylindrical_velocity_interpolators(grid, vr, vz, vtor):
         vz = np.zeros(grid.num_cell, dtype=np.float64)
     if vtor is None:
         vtor = np.zeros(grid.num_cell, dtype=np.float64)
+    
+    if grid.coordinate_system == 'cylindrical':
+        if return3d:
+            return grid.cartesian_3d_vector_interpolator(np.array([vr, vtor, vz]).T)
+        
+        return grid.vector_interpolator(np.array([vr, vtor, vz]).T)
 
-    return grid.vector_interpolator(np.array([vr, vtor, vz]).T)
+    elif grid.coordinate_system == 'cartesian':
+        x = grid.cell_centre[:, 0]
+        y = grid.cell_centre[:, 1]
+        phi = np.atan2(y, x)
+        vx = vr * np.cos(phi) - vtor * np.sin(phi)
+        vy = vr * np.sin(phi) + vtor * np.cos(phi)
+        if return3d:
+            return grid.cartesian_3d_vector_interpolator(np.array([vx, vy, vz]).T)
+        
+        return grid.vector_interpolator(np.array([vx, vy, vz]).T)
 
 
-def get_parallel_velocity_interpolators(grid, vpar, vrad, b_field):
+def get_parallel_velocity_interpolators(grid, vpar, vrad, b_field, return3d=False):
+    """
+    Creates velocity interpolator with respect to magnetic field direction
+    based on data arrays for parallel and radial velocity components.
+
+    In case of 3D grid or if return3d is True, the returned interpolator works in
+    the Cartesian coordinates.
+    """
+
+    if grid.dimension == 3:
+        return3d = True
 
     if vpar is None and vrad is None:
-        if grid.dimension == 2:  # 2D case
-            return ConstantVector2D(Vector3D(0, 1.e-16, 0))  # avoid zero-length vectors for blending
+        if return3d:
+            return ConstantVector3D(Vector3D(0, 1.e-16, 0))  # avoid zero-length vectors for blending
 
-        return ConstantVector3D(Vector3D(0, 1.e-16, 0))  # avoid zero-length vectors for blending
-
-    const_func = Constant2D if grid.dimension == 2 else Constant3D
-
-    vpar_i = const_func(0) if vpar is None else grid.interpolator(vpar)
-    vrad_i = const_func(0) if vrad is None else grid.interpolator(vrad)
+        return ConstantVector2D(Vector3D(0, 1.e-16, 0))
 
     parallel_vector = UnitVector2D(b_field)
     surface_normal = FluxSurfaceNormal(b_field)
 
-    if grid.dimension == 3:  # 3D case
+    if return3d:
+        vpar_i = Constant3D(0) if vpar is None else grid.cartesian_3d_interpolator(vpar)
+        vrad_i = Constant3D(0) if vrad is None else grid.cartesian_3d_interpolator(vrad)
         parallel_vector = VectorAxisymmetricMapper(parallel_vector)
         surface_normal = VectorAxisymmetricMapper(surface_normal)
+    else:
+        vpar_i = Constant2D(0) if vpar is None else grid.interpolator(vpar)
+        vrad_i = Constant2D(0) if vrad is None else grid.interpolator(vrad)
 
     return vpar_i * parallel_vector + vrad_i * surface_normal
 
 
-def get_poloidal_velocity_interpolators(grid, vpol, vrad, vtor, b_field):
+def get_poloidal_velocity_interpolators(grid, vpol, vrad, vtor, b_field, return3d=False):
+    """
+    Creates velocity interpolator with respect to magnetic field direction
+    based on data arrays for poloidal, radial and toroidal velocity components.
+
+    In case of 3D grid or if return3d is True, the returned interpolator works in
+    the Cartesian coordinates.
+    """
+    if grid.dimension == 3:
+        return3d = True
 
     if vpol is None and vrad is None and vtor is None:
-        if grid.dimension == 2:  # 2D case
-            return ConstantVector2D(Vector3D(0, 1.e-16, 0))  # avoid zero-length vectors for blending
+        if return3d:
+            return ConstantVector3D(Vector3D(0, 1.e-16, 0))  # avoid zero-length vectors for blending
 
-        return ConstantVector3D(Vector3D(0, 1.e-16, 0))  # avoid zero-length vectors for blending
-
-    const_func = Constant2D if grid.dimension == 2 else Constant3D
-
-    vpol_i = const_func(0) if vpol is None else grid.interpolator(vpol)
-    vrad_i = const_func(0) if vrad is None else grid.interpolator(vrad)
-    vtor_i = const_func(0) if vtor is None else grid.interpolator(vtor)
+        return ConstantVector2D(Vector3D(0, 1.e-16, 0))
 
     poloidal_vector = PoloidalFieldVector(b_field)
     surface_normal = FluxSurfaceNormal(b_field)
     toroidal_vector = ConstantVector2D(Vector3D(0, 1, 0))
 
-    if grid.dimension == 3:  # 3D case
+    if return3d:
+        vpol_i = Constant3D(0) if vpol is None else grid.cartesian_3d_interpolator(vpol)
+        vrad_i = Constant3D(0) if vrad is None else grid.cartesian_3d_interpolator(vrad)
+        vtor_i = Constant3D(0) if vtor is None else grid.cartesian_3d_interpolator(vtor)
         poloidal_vector = VectorAxisymmetricMapper(poloidal_vector)
         surface_normal = VectorAxisymmetricMapper(surface_normal)
         toroidal_vector = VectorAxisymmetricMapper(toroidal_vector)
+    else:
+        vpol_i = Constant2D(0) if vpol is None else grid.interpolator(vpol)
+        vrad_i = Constant2D(0) if vrad is None else grid.interpolator(vrad)
+        vtor_i = Constant2D(0) if vtor is None else grid.interpolator(vtor)
 
     return vpol_i * poloidal_vector + vrad_i * surface_normal + vtor_i * toroidal_vector
 

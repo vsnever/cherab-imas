@@ -18,35 +18,27 @@
 # See the Licence for the specific language governing permissions and limitations
 # under the Licence.
 
-from raysect.core.math.function.vector3d cimport Function1D as VectorFunction1D
-from raysect.core.math.function.vector3d cimport Function2D as VectorFunction2D
-from raysect.core.math.function.vector3d cimport Function3D as VectorFunction3D
+cimport numpy as np
+from raysect.core.math.vector cimport Vector3D
+from raysect.core.math.function.float.function3d.interpolate.common cimport MeshKDTree3D
+from raysect.core.math.function.float.function3d cimport Function3D
+from raysect.core.math.function.vector3d.function3d cimport Function3D as VectorFunction3D
 
 
-cdef class UnitVector1D(VectorFunction1D):
-
-   cdef VectorFunction1D _vector
-
-
-cdef class UnitVector2D(VectorFunction2D):
-
-   cdef VectorFunction2D _vector
-
-
-cdef class UnitVector3D(VectorFunction3D):
-
-   cdef VectorFunction3D _vector
-
-
-cdef class VectorConstantMapper2D(VectorFunction2D):
+cdef class UnstructGridFunction3D(Function3D):
 
     cdef:
-        readonly int axis
-        VectorFunction1D _function
+        MeshKDTree3D _kdtree
+        np.ndarray _grid_data, _tetrahedra_to_cell_map
+        np.int32_t[::1] _tetrahedra_to_cell_map_mv
+        double[::1] _grid_data_mv
+        double _fill_value
 
-
-cdef class VectorConstantMapper3D(VectorFunction3D):
+cdef class UnstructGridVectorFunction3D(VectorFunction3D):
 
     cdef:
-        readonly int axis
-        VectorFunction2D _function
+        MeshKDTree3D _kdtree
+        np.ndarray _grid_vectors, _tetrahedra_to_cell_map
+        np.int32_t[::1] _tetrahedra_to_cell_map_mv
+        double[:, ::1] _grid_vectors_mv
+        Vector3D _fill_vector

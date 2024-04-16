@@ -21,6 +21,7 @@ import numpy as np
 from imas.imasdef import EMPTY_INT
 
 from .load_unstruct_2d import load_unstruct_grid_2d
+from .load_struct_2d import load_struct_grid_2d
 
 
 def load_grid(grid_ggd, with_subsets=False):
@@ -38,32 +39,26 @@ def load_grid(grid_ggd, with_subsets=False):
     |   subset_id (optional): Dictionary with grid subset indices.
     """
 
-    spaces = get_standard_spaces(grid_ggd)
+    spaces, space_indices = get_standard_spaces(grid_ggd)
 
     if not len(spaces):
         raise RuntimeError("GGD grid contain no spaces.")
    
     if len(spaces) == 1:  # simple unstructured grids
         if len(spaces[0].objects_per_dimension) == 3: # 2D case
-            return load_unstruct_grid_2d(grid_ggd, 0, with_subsets=with_subsets)
+            return load_unstruct_grid_2d(grid_ggd, space_indices[0], with_subsets=with_subsets)
         if len(spaces[0].objects_per_dimension) == 4: # 3D case
             raise NotImplementedError("Loading unstructured 3D grids will be implemented in the future.")
 
-        raise RuntimeError("Unsupported grid type.")
-
     if len(spaces) == 2:  # 2D structured grid or 2D unstructured grid extended in 3D
         if len(spaces[0].objects_per_dimension) == 3 and len(spaces[1].objects_per_dimension) < 3:
-            raise NotImplementedError("Loading unstructured 2D grids extended in 3D will be implemented in the future.")
+            raise NotImplementedError("Loading unstructured grids extended in 3D will be implemented in the future.")
         if len(spaces[0].objects_per_dimension) < 3 and len(spaces[1].objects_per_dimension) < 3:
-            raise NotImplementedError("Loading structured 2D grids will be implemented in the future.")
-
-        raise RuntimeError("Unsupported grid type.")
+            return load_struct_grid_2d(grid_ggd, space_indices, with_subsets=with_subsets)
     
     if len(spaces) == 3:  # 3D structured grid
         if len(spaces[0].objects_per_dimension) < 3 and len(spaces[1].objects_per_dimension) < 3 and len(spaces[2].objects_per_dimension) < 3:
             raise NotImplementedError("Loading structured 3D grids will be implemented in the future.")
-
-        raise RuntimeError("Unsupported grid type.")
 
     raise RuntimeError("Unsupported grid type.")
 
@@ -74,7 +69,7 @@ def get_standard_spaces(grid_ggd):
 
     :param grid_ggd: The grid_ggd structure.
 
-    :returns: A list of standard spaces.
+    :returns: A lists of standard spaces and their indices.
     """
 
     if not len(grid_ggd.space):
@@ -84,11 +79,13 @@ def get_standard_spaces(grid_ggd):
         raise ValueError(error_massage)
 
     # Get list of standard spaces:
+    indices = []
     spaces = []
-    for space in grid_ggd.space:
+    for ispace, space in enumerate(grid_ggd.space):
         # JINTRAC confuses geometry_type with identifier, uncomment this check when the bug is fixed
         # if space.geometry_type.index == 0 or space.geometry_type.index == EMPTY_INT:
         if len(space.objects_per_dimension) and len(space.objects_per_dimension[0].object) > 2:
+            indices.append(ispace)
             spaces.append(space)
     
-    return spaces
+    return spaces, indices

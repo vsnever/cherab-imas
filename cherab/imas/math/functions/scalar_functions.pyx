@@ -18,57 +18,15 @@
 # See the Licence for the specific language governing permissions and limitations
 # under the Licence.
 
-from raysect.core.math cimport Vector3D
-from raysect.core.math.function.vector3d cimport autowrap_function1d as autowrap_vectorfunction1d
-from raysect.core.math.function.vector3d cimport autowrap_function2d as autowrap_vectorfunction2d
-from raysect.core.math.function.vector3d cimport autowrap_function3d as autowrap_vectorfunction3d
+from raysect.core.math.function.float cimport autowrap_function1d, autowrap_function2d
 
 
-cdef class UnitVector1D(VectorFunction1D):
+cdef class ConstantMapper2D(Function2D):
     """
-    Evaluates a unit vector for the given VectorFunction1D instance.
-    """
-
-    def __init__(self, object vector):
-        self._vector = autowrap_vectorfunction1d(vector)
-
-    cdef Vector3D evaluate(self, double x):
-
-        return self._vector.evaluate(x).normalise()
-
-
-cdef class UnitVector2D(VectorFunction2D):
-    """
-    Evaluates a unit vector for the given VectorFunction2D instance.
-    """
-
-    def __init__(self, object vector):
-        self._vector = autowrap_vectorfunction2d(vector)
-
-    cdef Vector3D evaluate(self, double x, double y):
-
-        return self._vector.evaluate(x, y).normalise()
-
-
-cdef class UnitVector3D(VectorFunction3D):
-    """
-    Evaluates a unit vector for the given VectorFunction3D instance.
-    """
-
-    def __init__(self, object vector):
-        self._vector = autowrap_vectorfunction3d(vector)
-
-    cdef Vector3D evaluate(self, double x, double y, double z):
-
-        return self._vector.evaluate(x, y, z).normalise()
-
-
-cdef class VectorConstantMapper2D(VectorFunction2D):
-    """
-    Evaluates the given VectorFunction1D assuming that the function is
+    Evaluates the given Function1D assuming that the function is
     a constant along the remaining axis.
 
-    :param object function1d: 1D vector function to evaluate.
+    :param object function1d: 1D function to evaluate.
     :param object axis: The axis along which the function is constant.
         Must be ['x', 'y'] or [0, 1].
     """
@@ -87,9 +45,9 @@ cdef class VectorConstantMapper2D(VectorFunction2D):
             raise ValueError("The axis must be either the string 'x', 'y', or the value 0 or 1.")
 
         self.axis = axis
-        self._function = autowrap_vectorfunction1d(function1d)
+        self._function = autowrap_function1d(function1d)
 
-    cdef Vector3D evaluate(self, double x, double y):
+    cdef double evaluate(self, double x, double y) except? -1e999:
 
         if self.axis == 0:
             return self._function.evaluate(y)
@@ -97,12 +55,12 @@ cdef class VectorConstantMapper2D(VectorFunction2D):
         return self._function.evaluate(x)
 
 
-cdef class VectorConstantMapper3D(VectorFunction3D):
+cdef class ConstantMapper3D(Function3D):
     """
-    Evaluates the given VectorFunction2D assuming that the function is
+    Evaluates the given Function2D assuming that the function is
     a constant along the given axis.
 
-    :param object function2d: 2D vector function to evaluate.
+    :param object function2d: 2D function to evaluate.
     :param object axis: The axis along which the function is constant.
         Must be ['x', 'y', 'z'] or [0, 1, 2].
     """
@@ -121,9 +79,9 @@ cdef class VectorConstantMapper3D(VectorFunction3D):
             raise ValueError("The axis must be either the string 'x', 'y' or 'z', or the value 0, 1 or 2.")
 
         self.axis = axis
-        self._function = autowrap_vectorfunction2d(function2d)
+        self._function = autowrap_function2d(function2d)
 
-    cdef Vector3D evaluate(self, double x, double y, double z):
+    cdef double evaluate(self, double x, double y, double z) except? -1e999:
 
         if self.axis == 0:
             return self._function.evaluate(y, z)

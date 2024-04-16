@@ -18,3 +18,5 @@
 
 from .base_mesh import GGDGrid
 from .unstruct_2d_mesh import UnstructGrid2D
+from .struct_2d_mesh import StructGrid2D
+from .struct_3d_mesh import StructGrid3D

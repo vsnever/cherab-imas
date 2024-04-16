@@ -53,8 +53,6 @@ def load_equilibrium(shot, run, user, database, backend=imas.imasdef.MDSPLUS_BAC
 
     equilibrium_dict = load_equilibrium_data(equilibrium_ids)
 
-    entry.close()
-
     cocos_11to3(equilibrium_dict)
 
     equilibrium_dict['psi_norm'][0] = min(0, equilibrium_dict['psi_norm'][0])

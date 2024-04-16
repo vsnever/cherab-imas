@@ -23,7 +23,7 @@ from imas.imasdef import EMPTY_INT
 from cherab.imas.ggd import UnstructGrid2D
 
 
-VERTEX_DIMENSION = 0
+NODE_DIMENSION = 0
 EDGE_DIMENSION = 1
 FACE_DIMENSION = 2
 
@@ -33,7 +33,7 @@ def load_unstruct_grid_2d(grid_ggd, space_index=0, with_subsets=False):
     Loads unstructured 2D grid from the grid_ggd structure.
 
     :param grid_ggd: The grid_ggd structure.
-    :param space_index: The index of the grid space. Default is 0.
+    :param space_index: The grid space index to use. Default is 0.
     :param with_subsets: Read grid subset data if True. Default is True.
 
     :returns:
@@ -53,19 +53,19 @@ def load_unstruct_grid_2d(grid_ggd, space_index=0, with_subsets=False):
     grid_name = grid_ggd.identifier.name
 
     # Reading vertices
-    num_vert = len(space.objects_per_dimension[VERTEX_DIMENSION].object)
+    num_vert = len(space.objects_per_dimension[NODE_DIMENSION].object)
     vertices = np.empty((num_vert, 2), dtype=np.float64)
     for i in range(num_vert):
-        vertices[i] = space.objects_per_dimension[VERTEX_DIMENSION].object[i].geometry[:2]
+        vertices[i] = space.objects_per_dimension[NODE_DIMENSION].object[i].geometry[:2]
 
     # Reading polygonal cells
     cells = []
-    winding_ok = True
+    traversal_ok = True
     for object in space.objects_per_dimension[FACE_DIMENSION].object:
         # getting cell from nodes
         cell = np.array(object.nodes, dtype=np.int32) - 1  # Fortran to C indexing
         if cell.size > 3:
-            # trying to get the nodes in winding order by parsing the edges
+            # trying to get the nodes in traversal order by parsing the edges
             edge_dict = {}
             for boundary in object.boundary:
                 n1, n2 = space.objects_per_dimension[EDGE_DIMENSION].object[boundary.index - 1].nodes - 1 # Fortran to C indexing
@@ -86,7 +86,7 @@ def load_unstruct_grid_2d(grid_ggd, space_index=0, with_subsets=False):
                     edge_dict[n2][1] = n1
                 else:
                     edge_dict[n2] = [n1, -1]
-            if len(edge_dict) == cell.size:  # success, getting the cell nodes in winding order
+            if len(edge_dict) == cell.size:  # success, getting the cell nodes in traversal order
                 cell1 = np.empty(len(edge_dict), dtype=np.int32)
                 cell1[0] = cell[0]
                 pair = edge_dict[cell1[0]]
@@ -96,12 +96,12 @@ def load_unstruct_grid_2d(grid_ggd, space_index=0, with_subsets=False):
                     cell1[i] = pair[1] if cell1[i - 2] == pair[0] else pair[0]
                 cell = cell1
             else:
-                winding_ok = False
+                traversal_ok = False
 
         cells.append(cell)
     
-    if not winding_ok:
-        print("Warning! Unable to verify that the cell nodes are in the winging order.")
+    if not traversal_ok:
+        print("Warning! Unable to verify that the cell nodes are in traversal order.")
     
     grid = UnstructGrid2D(vertices, cells, name=grid_name)
     

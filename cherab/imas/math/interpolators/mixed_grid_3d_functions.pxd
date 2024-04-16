@@ -20,25 +20,29 @@
 
 cimport numpy as np
 from raysect.core.math.vector cimport Vector3D
-from raysect.core.math.function.float.function2d cimport Function2D
-from raysect.core.math.function.vector3d.function2d cimport Function2D as VectorFunction2D
+from raysect.core.math.function.float.function2d.interpolate.common cimport MeshKDTree2D
+from raysect.core.math.function.float.function3d cimport Function3D
+from raysect.core.math.function.vector3d.function3d cimport Function3D as VectorFunction3D
 
 
-cdef class StructGridFunction2D(Function2D):
+cdef class MixedGridFunction3D(Function3D):
 
     cdef:
-        int _subset_size
-        np.ndarray _x, _y, _grid_data, _subset_map
-        double[::1] _x_mv, _y_mv, _grid_data_mv
-        np.int32_t[:, ::1] _subset_map_mv
+        MeshKDTree2D _kdtree
+        np.ndarray _z, _grid_data, _triangle_to_cell_map
+        np.int32_t[::1] _triangle_to_cell_map_mv
+        double[::1] _z_mv
+        double[:, ::1] _grid_data_mv
         double _fill_value
+        readonly int z_axis
 
-cdef class StructGridVectorFunction2D(VectorFunction2D):
+cdef class MixedGridVectorFunction3D(VectorFunction3D):
 
     cdef:
-        int _subset_size
-        np.ndarray _x, _y, _grid_vectors, _subset_map
-        double[::1] _x_mv, _y_mv
-        double[:, ::1] _grid_vectors_mv
-        np.int32_t[:, ::1] _subset_map_mv
+        MeshKDTree2D _kdtree
+        np.ndarray _z, _grid_vectors, _triangle_to_cell_map
+        np.int32_t[::1] _triangle_to_cell_map_mv
+        double[::1] _z_mv
+        double[:, :, ::1] _grid_vectors_mv
         Vector3D _fill_vector
+        readonly int z_axis

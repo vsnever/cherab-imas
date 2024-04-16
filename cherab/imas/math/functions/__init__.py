@@ -16,4 +16,5 @@
 # See the Licence for the specific language governing permissions and limitations
 # under the Licence.
 
-from .vector_functions import UnitVector1D, UnitVector2D, UnitVector3D
+from .scalar_functions import ConstantMapper2D, ConstantMapper3D
+from .vector_functions import UnitVector1D, UnitVector2D, UnitVector3D, VectorConstantMapper2D, VectorConstantMapper3D

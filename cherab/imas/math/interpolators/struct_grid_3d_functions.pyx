@@ -29,22 +29,27 @@ cimport cython
 cdef class StructGridFunction3D(Function3D):
     """
     A simple interpolator for the data defined on the 3D structured grid.
-    Finds the cell containing the point (x, y, z). Returns the data value for this cell
-    or the `fill_value` if the points lies outside the grid.
+    Finds the cell containing the point (x, y, z).
+    Checks if the cell is contained within the grid subset.
+    Returns the data value for this cell or the `fill_value` if the points lies
+    outside the subset. 
 
-    :param object x: The corners of the quadrilateral cells along x axis.
-    :param object y: The corners of the quadrilateral cells along y axis.
-    :param object z: The corners of the quadrilateral cells along z axis.
-    :param ndarray grid_data: An (x.size - 1, y.size - 1, z.size - 1)-shaped array containing data
-        in the grid cells.
-    :param double fill_value: A value returned outside the gird. Default is 0.
+    :param object x: The corners of the rectangular cells along x axis.
+    :param object y: The corners of the rectangular cells along y axis.
+    :param object z: The corners of the rectangular cells along z axis.
+    :param ndarray grid_data: A 1D N-size array with the data defined on the subset.
+    :param object subset_indices: A (3, N)-shaped array-like containing cell indices
+        of the grid subset. Default is None (the subset contains the whole grid).
+    :param double fill_value: A value returned outside the subset. Default is 0.
     """
 
-    def __init__(self, object x not None, object y not None, object z not None, np.ndarray grid_data not None, double fill_value=0):
+    def __init__(self, object x not None, object y not None, object z not None,
+                 np.ndarray grid_data not None,
+                 object subset_indices=None, double fill_value=0):
 
         self._x = np.array(x, dtype=np.float64)
         self._y = np.array(y, dtype=np.float64)
-        self._z = np.array(z, dtype=np.float64)
+        self._z = np.array(y, dtype=np.float64)
 
         if self._x.ndim != 1:
             raise ValueError("Argument 'x' must be 1D array.")
@@ -60,12 +65,31 @@ cdef class StructGridFunction3D(Function3D):
         if self._z.size < 2:
             raise ValueError("Array 'z' must have at least 2 elements.")
 
+        if subset_indices is not None:
+            subset_indices = np.array(subset_indices, dtype=np.int32)
+
+            if subset_indices.ndim != 2:
+                raise ValueError("Argument 'subset_indices' must be 2D array.")
+            
+            if subset_indices.shape[0] != 3:
+                raise ValueError("Argument 'subset_indices' must be a (3, N)-shaped array.")
+            
+            self._subset_map = -1 * np.ones((self._x.size - 1, self._y.size - 1, self._z.size - 1), dtype=np.int64)         
+            self._subset_size = subset_indices.shape[1]       
+            self._subset_map[(subset_indices[0], subset_indices[1], subset_indices[2])] = np.arange(self._subset_size, dtype=np.int64)
+        
+        else:
+            self._subset_size = (self._x.size - 1) * (self._y.size - 1) * (self._z.size - 1)
+            self._subset_map = np.arange(self._subset_size, dtype=np.int64).reshape((self._x.size - 1, self._y.size - 1, self._z.size - 1))
+
         # Attention!!! Do not copy grid_data! Attribute self._grid_data must point to the original data array,
         # so as not to re-initialize the interpolator if the user changes data values.
 
-        # populate internal attributes
-        if grid_data.shape[0] != self._x.size - 1 or grid_data.shape[1] != self._y.size - 1 or grid_data.shape[2] != self._z.size - 1:
-            raise ValueError("The shape of the grid_data array does not match the shape of the grid.")
+        if grid_data.ndim != 1:
+            raise ValueError("The grid_data must be a 1D array.")
+
+        if grid_data.size != self._subset_size:
+            raise ValueError("The size of the grid_data array does not match the number of cells in the subset.")
 
         self._grid_data = grid_data
         self._fill_value = fill_value
@@ -73,20 +97,82 @@ cdef class StructGridFunction3D(Function3D):
         self._x_mv = self._x
         self._y_mv = self._y
         self._z_mv = self._z
+        self._subset_map_mv = self._subset_map
         self._grid_data_mv = self._grid_data
 
     def __getstate__(self):
-        return self._grid_data, self._fill_value, self._x, self._y, self._z
+        return self._grid_data, self._subset_map, self._fill_value, self._x, self._y, self._z
 
     def __setstate__(self, state):
-        self._grid_data, self._fill_value, self._x, self._y, self._z = state
+        self._grid_data, self._subset_map, self._fill_value, self._x, self._y, self._z = state
         self._x_mv = self._x
         self._y_mv = self._y
         self._z_mv = self._z
+        self._subset_map_mv = self._subset_map
         self._grid_data_mv = self._grid_data
 
     def __reduce__(self):
         return self.__new__, (self.__class__, ), self.__getstate__()
+
+    @classmethod
+    def instance(cls, object instance not None, np.ndarray grid_data=None, object fill_value=None):
+        """
+        Creates a new interpolator instance from an existing StructGridFunction3D
+        or StructGridVectorFunction3D instance.
+        The new interpolator instance will share the subset-to-grid map with
+        the original interpolator. The grid_data of the new instance can
+        be redefined.
+        This method should be used if the user has multiple datasets
+        that lie on the same subset of the grid. Using this methods reduces memory usage.
+
+        If created from the StructGridVectorFunction3D instance,
+        the grid_data and the fill_value must not be None.
+
+        :param object instance: StructGridFunction3D or StructGridVectorFunction3D object.
+        :param ndarray grid_data: An array containing data in the grid cells.
+        :param object fill_value: A value returned outside the gird.
+        :rtype: StructGridFunction3D
+        """
+
+        cdef StructGridFunction3D m, inst
+        cdef StructGridVectorFunction3D instvec
+
+        m = StructGridFunction3D.__new__(StructGridFunction3D)
+
+        if isinstance(instance, StructGridFunction3D):
+            inst = instance
+            # copy source data
+            m._x = inst._x
+            m._y = inst._y
+            m._z = inst._z
+            m._subset_map = inst._subset_map
+
+            # replace grid data and fill value
+            m._grid_data = inst._grid_data if grid_data is None else grid_data
+            m._fill_value = inst._fill_value if fill_value is None else <double>fill_value
+        elif isinstance(instance, StructGridVectorFunction3D):
+            instvec = instance
+            m._x = instvec._x
+            m._y = instvec._y
+            m._z = instvec._z
+            m._subset_map = instvec._subset_map
+
+            if grid_data is None:
+                raise ValueError("Argument 'grid_data' must not be None if the new instant StructGridFunction3D is created from the StructGridVectorFunction3D instance.")
+            if fill_value is None:
+                raise ValueError("Argument 'fill_value' must not be None if the new instant StructGridFunction3D is created from the StructGridVectorFunction3D instance.")
+            m._grid_data = grid_data
+            m._fill_value = <double>fill_value
+        else:
+            raise TypeError("Argument 'instance' must be either StructGridFunction2D or StructGridVectorFunction2D instance.")
+
+        m._x_mv = m._x
+        m._y_mv = m._y
+        m._z_mv = m._z
+        m._subset_map_mv = m._subset_map
+        m._grid_data_mv = m._grid_data
+
+        return m
 
     @cython.boundscheck(False)
     @cython.wraparound(False)
@@ -96,9 +182,12 @@ cdef class StructGridFunction3D(Function3D):
         cdef int ix = find_index(self._x_mv, x)
         cdef int iy = find_index(self._y_mv, y)
         cdef int iz = find_index(self._z_mv, z)
+        cdef np.int64_t indx
 
         if -1 < ix < self._x_mv.shape[0] and -1 < iy < self._y_mv.shape[0] and -1 < iz < self._z_mv.shape[0]:
-            return self._grid_data_mv[ix, iy, iz]
+            indx = self._subset_map_mv[ix, iy, iz]
+            if indx > -1:
+                return self._grid_data_mv[indx]
 
         return self._fill_value
 
@@ -106,22 +195,28 @@ cdef class StructGridFunction3D(Function3D):
 cdef class StructGridVectorFunction3D(VectorFunction3D):
     """
     A simple vector interpolator for the data defined on the 3D structured grid.
-    Finds the cell containing the point (x, y, z). Returns the 3D vector value this cell
-    or the `fill_vector` if the points lies outside the grid.
+    Finds the cell containing the point (x, y, z).
+    Checks if the cell is contained within the grid subset.
+    Returns the 3D vector value for this cell or the `fill_vector` if the points lies
+    outside the subset.
 
     :param object x: The corners of the quadrilateral cells along x axis.
     :param object y: The corners of the quadrilateral cells along y axis.
-    :param object z: The corners of the quadrilateral cells along y axis.
-    :param ndarray grid_vectors: An (3, x.size - 1, y.size - 1, z.size - 1)-shaped array
-        containing 3D vectors in the grid cells.
+    :param object z: The corners of the quadrilateral cells along z axis.
+    :param ndarray grid_vectors: An (3, N)-shaped array containing 3D vectors
+        on the grid subset.
+    :param object subset_indices: A (3, N)-shaped array-like containing cell indices
+        of the grid subset. Default is None (the subset contains the whole grid).
     :param Vector3D fill_vector: A 3D vector returned outside the gird. Default is (0, 0, 0).
     """
 
-    def __init__(self, object x not None, object y not None, object z not None, np.ndarray grid_vectors not None, Vector3D fill_vector=Vector3D(0, 0, 0)):
+    def __init__(self, object x not None, object y not None, object z not None,
+                 np.ndarray grid_vectors not None, object subset_indices=None,
+                 Vector3D fill_vector=Vector3D(0, 0, 0)):
 
         self._x = np.array(x, dtype=np.float64)
         self._y = np.array(y, dtype=np.float64)
-        self._z = np.array(z, dtype=np.float64)
+        self._z = np.array(y, dtype=np.float64)
 
         if self._x.ndim != 1:
             raise ValueError("Argument 'x' must be 1D array.")
@@ -136,13 +231,35 @@ cdef class StructGridVectorFunction3D(VectorFunction3D):
             raise ValueError("Array 'y' must have at least 2 elements.")
         if self._z.size < 2:
             raise ValueError("Array 'z' must have at least 2 elements.")
+        
+        if subset_indices is not None:
+            subset_indices = np.array(subset_indices, dtype=np.int32)
+
+            if subset_indices.ndim != 2:
+                raise ValueError("Argument 'subset_indices' must be 2D array.")
+            
+            if subset_indices.shape[0] != 3:
+                raise ValueError("Argument 'subset_indices' must be a (3, N)-shaped array.")
+            
+            self._subset_map = -1 * np.ones((self._x.size - 1, self._y.size - 1, self._z.size - 1), dtype=np.int64)         
+            self._subset_size = subset_indices.shape[1]       
+            self._subset_map[(subset_indices[0], subset_indices[1], subset_indices[2])] = np.arange(self._subset_size, dtype=np.int64)
+        
+        else:
+            self._subset_size = (self._x.size - 1) * (self._y.size - 1) * (self._z.size - 1)
+            self._subset_map = np.arange(self._subset_size, dtype=np.int64).reshape((self._x.size - 1, self._y.size - 1, self._z.size - 1))
 
         # Attention!!! Do not copy grid_vectors! Attribute self._grid_vectors must point to the original data array,
         # so as not to re-initialize the interpolator if the user changes data values.
 
-        # populate internal attributes
-        if grid_vectors.shape[0] != 3 or grid_vectors.shape[1] != self._x.size - 1 or grid_vectors.shape[2] != self._y.size - 1 or grid_vectors.shape[3] != self._z.size - 1:
-            raise ValueError("The shape of the grid_vectors array does not match the shape of the grid.")
+        if grid_vectors.ndim != 2:
+            raise ValueError("The grid_vectors must be a 2D array.")
+
+        if grid_vectors.shape[0] != 3:
+            raise ValueError("The grid_vectors must be a (3, N)-shaped array.")
+
+        if grid_vectors.shape[1] != self._subset_size:
+            raise ValueError("The grid_vectors.shape[1] does not match the number of cells in the subset.")
 
         self._grid_vectors = grid_vectors
         self._fill_vector = fill_vector
@@ -150,20 +267,83 @@ cdef class StructGridVectorFunction3D(VectorFunction3D):
         self._x_mv = self._x
         self._y_mv = self._y
         self._z_mv = self._z
+        self._subset_map_mv = self._subset_map
         self._grid_vectors_mv = self._grid_vectors
 
     def __getstate__(self):
-        return self._grid_vectors, self._fill_vector, self._x, self._y, self._z
+        return self._grid_vectors, self._subset_map, self._fill_vector, self._x, self._y, self._z, self._subset_size
 
     def __setstate__(self, state):
-        self._grid_vectors, self._fill_vector, self._x, self._y, self._z = state
+        self._grid_vectors, self._subset_map, self._fill_vector, self._x, self._y, self._z, self._subset_size = state
         self._x_mv = self._x
         self._y_mv = self._y
         self._z_mv = self._z
+        self._subset_map_mv = self._subset_map
         self._grid_vectors_mv = self._grid_vectors
 
     def __reduce__(self):
         return self.__new__, (self.__class__, ), self.__getstate__()
+
+    @classmethod
+    def instance(cls, object instance not None, np.ndarray grid_vectors=None,
+                 Vector3D fill_vector=None):
+        """
+        Creates a new interpolator instance from an existing StructGridVectorFunction3D
+        or StructGridFunction3D instance.
+        The new interpolator instance will share the subset-to-grid map with
+        the original interpolator. The grid_vectors of the new instance can
+        be redefined.
+        This method should be used if the user has multiple datasets
+        that lie on the same subset of the grid. Using this methods reduces memory usage.
+
+        If created from the StructGridFunction3D instance,
+        the grid_vectors and the fill_vector must not be None.
+
+        :param object instance: StructGridVectorFunction3D or StructGridFunction3D object.
+        :param ndarray grid_vectors: An array containing vector data in the grid cells.
+        :param object fill_value: A value returned outside the gird.
+        :rtype: StructGridVectorFunction3D
+        """
+
+        cdef StructGridVectorFunction3D m, instvec
+        cdef StructGridFunction3D inst
+
+        m = StructGridVectorFunction3D.__new__(StructGridVectorFunction3D)
+
+        if isinstance(instance, StructGridVectorFunction3D):
+            instvec = instance
+            # copy source data
+            m._x = instvec._x
+            m._y = instvec._y
+            m._z = instvec._z
+            m._subset_map = instvec._subset_map
+
+            # replace grid data and fill value
+            m._grid_vectors = instvec._grid_vectors if grid_vectors is None else grid_vectors
+            m._fill_vector = instvec._fill_vector if fill_vector is None else fill_vector
+        elif isinstance(instance, StructGridFunction3D):
+            inst = instance
+            m._x = inst._x
+            m._y = inst._y
+            m._z = inst._z
+            m._subset_map = inst._subset_map
+
+            if grid_vectors is None:
+                raise ValueError("Argument 'grid_vectors' must not be None if the new instant StructGridVectorFunction3D is created from the StructGridFunction3D instance.")
+            if fill_vector is None:
+                raise ValueError("Argument 'fill_vector' must not be None if the new instant StructGridVectorFunction3D is created from the StructGridFunction3D instance.")
+            m._grid_vectors = grid_vectors
+            m._fill_vector = fill_vector
+        else:
+            raise TypeError("Argument 'instance' must be either StructGridFunction3D or StructGridVectorFunction3D instance.")
+
+        m._x_mv = m._x
+        m._y_mv = m._y
+        m._z_mv = m._z
+        m._subset_map_mv = m._subset_map
+        m._grid_vectors_mv = m._grid_vectors
+
+        return m
 
     @cython.boundscheck(False)
     @cython.wraparound(False)
@@ -174,13 +354,16 @@ cdef class StructGridVectorFunction3D(VectorFunction3D):
         cdef int iy = find_index(self._y_mv, y)
         cdef int iz = find_index(self._z_mv, z)
         cdef double vx, vy, vz
+        cdef np.int64_t indx
 
         if -1 < ix < self._x_mv.shape[0] and -1 < iy < self._y_mv.shape[0] and -1 < iz < self._z_mv.shape[0]:
 
-            vx = self._grid_vectors_mv[0, ix, iy, iz]
-            vy = self._grid_vectors_mv[1, ix, iy, iz]
-            vz = self._grid_vectors_mv[2, ix, iy, iz]
+            indx = self._subset_map_mv[ix, iy, iz]
+            if indx > -1:
+                vx = self._grid_vectors_mv[0, indx]
+                vy = self._grid_vectors_mv[1, indx]
+                vz = self._grid_vectors_mv[2, indx]
 
-            return new_vector3d(vx, vy, vz)
+                return new_vector3d(vx, vy, vz)
 
         return self._fill_vector

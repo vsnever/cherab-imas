@@ -61,8 +61,6 @@ def load_wall_mesh(shot, run, user, database, backend=imas.imasdef.MDSPLUS_BACKE
 
     wall_dict = load_wall_3d(wall_ids.description_ggd[desc_ggd_index], subsets)
 
-    entry.close()
-
     components = {}
 
     for key, value in wall_dict.items():
