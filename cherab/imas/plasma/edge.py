@@ -245,9 +245,9 @@ def get_cylindrical_velocity_interpolators(grid, vr, vz, vtor, return3d=False):
     
     if grid.coordinate_system == 'cylindrical':
         if return3d:
-            return grid.cartesian_3d_vector_interpolator(np.array([vr, vtor, vz]).T)
+            return grid.cartesian_3d_vector_interpolator(np.array([vr, vtor, vz]))
         
-        return grid.vector_interpolator(np.array([vr, vtor, vz]).T)
+        return grid.vector_interpolator(np.array([vr, vtor, vz]))
 
     elif grid.coordinate_system == 'cartesian':
         x = grid.cell_centre[:, 0]
@@ -256,9 +256,9 @@ def get_cylindrical_velocity_interpolators(grid, vr, vz, vtor, return3d=False):
         vx = vr * np.cos(phi) - vtor * np.sin(phi)
         vy = vr * np.sin(phi) + vtor * np.cos(phi)
         if return3d:
-            return grid.cartesian_3d_vector_interpolator(np.array([vx, vy, vz]).T)
+            return grid.cartesian_3d_vector_interpolator(np.array([vx, vy, vz]))
         
-        return grid.vector_interpolator(np.array([vx, vy, vz]).T)
+        return grid.vector_interpolator(np.array([vx, vy, vz]))
 
 
 def get_parallel_velocity_interpolators(grid, vpar, vrad, b_field, return3d=False):
